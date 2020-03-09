@@ -1,5 +1,4 @@
 #include "SimpleLRU.h"
-#include <iostream>
 
 namespace Afina {
 namespace Backend {

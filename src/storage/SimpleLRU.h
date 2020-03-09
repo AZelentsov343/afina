@@ -5,7 +5,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <iostream>
 
 #include <afina/Storage.h>
 

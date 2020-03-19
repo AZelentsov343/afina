@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <algorithm>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -28,13 +29,17 @@ namespace Network {
 namespace MTblocking {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl), max_workers(0),
+running(false), _server_socket(0), current_workers(0) {}
 
 // See Server.h
-ServerImpl::~ServerImpl() {}
+ServerImpl::~ServerImpl() {
+    workers.clear();
+}
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
+    max_workers = n_workers;
     _logger = pLogging->select("network");
     _logger->info("Start mt_blocking network service");
 
@@ -73,20 +78,119 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     }
 
     running.store(true);
+    current_workers.store(0);
     _thread = std::thread(&ServerImpl::OnRun, this);
 }
 
 // See Server.h
 void ServerImpl::Stop() {
+    _logger->debug("Stopping server");
     running.store(false);
     shutdown(_server_socket, SHUT_RDWR);
+    for (auto socket : opened_connections) {
+        shutdown(socket, SHUT_RD);
+    }
+    _logger->debug("shut down all sockets");
 }
 
 // See Server.h
 void ServerImpl::Join() {
+    close(_server_socket);
     assert(_thread.joinable());
     _thread.join();
-    close(_server_socket);
+    _logger->debug("waiting for threads to finish");
+    std::unique_lock<std::mutex> lock(connections_mutex);
+    while (current_workers != 0) {
+        server_stopped.wait(lock);
+    }
+    for (auto &thr : workers) {
+        thr->join();
+    }
+    _logger->debug("joined all threads, goodbye");
+}
+
+void ServerImpl::worker(int client_socket) {
+
+    size_t buf_size = 512;
+
+    std::size_t arg_remains = 0;
+    Protocol::Parser parser;
+    std::string argument_for_command;
+    std::unique_ptr<Execute::Command> command_to_execute;
+    std::string buffer;
+
+    WorkerStates state = NEED_COMMAND;
+
+    while (true) {
+        size_t bytes;
+        char buf_char[buf_size];
+        bytes = read(client_socket, buf_char, buf_size);
+        if (bytes == 0) {
+            _logger->debug("Connection {} closed", client_socket);
+            {
+                std::unique_lock<std::mutex> lock(connections_mutex);
+                std::remove(opened_connections.begin(), opened_connections.end(), client_socket);
+                current_workers--;
+            }
+            close(client_socket);
+            server_stopped.notify_one();
+            break;
+        }
+        _logger->debug("read {} bytes from {} connection", bytes, client_socket);
+        buffer = buf_char;
+
+        while (not buffer.empty()) {
+            if (state == NEED_COMMAND) {
+                size_t parsed;
+                try {
+                    bool parsed_correctly = parser.Parse(buffer, parsed);
+                    _logger->debug("Parsed {} bytes from {} connection", parsed, client_socket);
+                    if (parsed_correctly) {
+                        command_to_execute = parser.Build(arg_remains);
+                        if (arg_remains > 0) {
+                            state = NEED_ARGS;
+                        } else if (arg_remains == 0) {
+                            state = READY_TO_EXECUTE;
+                        }
+                    }
+                } catch (std::runtime_error& err) {
+                    _logger->debug("error happened while parsing :{}", err.what());
+                    std::string msg = std::string("PARSER ERROR") + err.what();
+                    send(client_socket, msg.data(), msg.size(), 0);
+                }
+
+                if (parsed == 0) {
+                    break;
+                } else {
+                    buffer.erase(0, parsed);
+                }
+            } else if (state == NEED_ARGS) {
+                if (arg_remains <= buffer.size()) {
+                    argument_for_command = buffer.substr(0, arg_remains);
+                    buffer.erase(0, arg_remains);
+                    state = READY_TO_EXECUTE;
+                } else {
+                    argument_for_command = buffer;
+                    arg_remains -= buffer.size();
+                    buffer.clear();
+                }
+            } else { // state == READY_TO_EXECUTE
+                std::string message;
+                try {
+                    command_to_execute->Execute(*pStorage, argument_for_command, message);
+                    message += "\r\n";
+                    send(client_socket, message.data(), message.size(), 0);
+                } catch (std::exception& ex) {
+                    message = std::string("SERVER ERROR ") + ex.what() + "\r\n";
+                    send(client_socket, message.data(), message.size(), 0);
+                }
+
+                argument_for_command.clear();
+                command_to_execute.reset();
+                parser.Reset();
+            }
+        }
+    }
 }
 
 // See Server.h
@@ -96,10 +200,10 @@ void ServerImpl::OnRun() {
     // - command_to_execute: last command parsed out of stream
     // - arg_remains: how many bytes to read from stream to get command argument
     // - argument_for_command: buffer stores argument
-    std::size_t arg_remains;
-    Protocol::Parser parser;
-    std::string argument_for_command;
-    std::unique_ptr<Execute::Command> command_to_execute;
+    //std::size_t arg_remains;
+    //Protocol::Parser parser;
+    //std::string argument_for_command;
+    //std::unique_ptr<Execute::Command> command_to_execute;
     while (running.load()) {
         _logger->debug("waiting for connection...");
 
@@ -132,19 +236,28 @@ void ServerImpl::OnRun() {
             setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
         }
 
-        // TODO: Start new thread and process data from/to connection
-        {
-            static const std::string msg = "TODO: start new thread and process memcached protocol instead";
-            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
-                _logger->error("Failed to write response to client: {}", strerror(errno));
+        if (current_workers < max_workers) {
+            {
+                std::unique_lock<std::mutex> lock(connections_mutex);
+                opened_connections.push_back(client_socket);
+                current_workers++;
             }
+            _logger->debug("creating new worker, now have {} workers", current_workers);
+            std::thread new_tr(&ServerImpl::worker, this, client_socket);
+            workers.push_back(&new_tr);
+            new_tr.detach();
+        } else {
+            _logger->debug("too many workers, closing connection {}", client_socket);
             close(client_socket);
         }
+
     }
 
     // Cleanup on exit...
     _logger->warn("Network stopped");
 }
+
+
 
 } // namespace MTblocking
 } // namespace Network

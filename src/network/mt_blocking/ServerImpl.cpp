@@ -98,15 +98,14 @@ void ServerImpl::Join() {
     close(_server_socket);
     assert(_thread.joinable());
     _thread.join();
-    _logger->debug("waiting for threads to finish");
-    std::unique_lock<std::mutex> lock(connections_mutex);
-    while (current_workers != 0) {
-        server_stopped.wait(lock);
+    _logger->debug("waiting current_workers == 0");
+    {
+        std::unique_lock<std::mutex> lock(connections_mutex);
+        while (current_workers != 0) {
+            server_stopped.wait(lock);
+        }
     }
-    for (auto &thr : workers) {
-        thr->join();
-    }
-    _logger->debug("joined all threads, goodbye");
+    _logger->debug("all workers dead, goodbye");
 }
 
 void ServerImpl::worker(int client_socket) {
@@ -125,7 +124,7 @@ void ServerImpl::worker(int client_socket) {
         size_t bytes;
         char buf_char[buf_size];
         bytes = read(client_socket, buf_char, buf_size);
-        if (bytes == 0) {
+        if (bytes == 0 or bytes > buf_size) {
             _logger->debug("Connection {} closed", client_socket);
             {
                 std::unique_lock<std::mutex> lock(connections_mutex);
@@ -138,17 +137,25 @@ void ServerImpl::worker(int client_socket) {
         }
         _logger->debug("read {} bytes from {} connection", bytes, client_socket);
         buffer = buf_char;
+        _logger->debug("current buffer: {}, size = {}", buffer, buffer.size());
 
-        while (not buffer.empty()) {
+        size_t parsed_overall = 0;
+
+        while (parsed_overall < bytes or command_to_execute) {
             if (state == NEED_COMMAND) {
+                _logger->debug("state need command");
                 size_t parsed;
                 try {
                     bool parsed_correctly = parser.Parse(buffer, parsed);
                     _logger->debug("Parsed {} bytes from {} connection", parsed, client_socket);
                     if (parsed_correctly) {
+                        _logger->debug("Parsed correctly, building command");
+                        parsed_overall += parsed;
+                        _logger->debug("Parsed overall: {}", parsed_overall);
                         command_to_execute = parser.Build(arg_remains);
                         if (arg_remains > 0) {
                             state = NEED_ARGS;
+                            arg_remains += 2;
                         } else if (arg_remains == 0) {
                             state = READY_TO_EXECUTE;
                         }
@@ -160,14 +167,18 @@ void ServerImpl::worker(int client_socket) {
                 }
 
                 if (parsed == 0) {
+                    _logger->debug("parsed == 0, breaking");
                     break;
                 } else {
                     buffer.erase(0, parsed);
+                    _logger->debug("current buffer after parsing: {}, size = {}", buffer, buffer.size());
                 }
             } else if (state == NEED_ARGS) {
+                _logger->debug("state need args");
                 if (arg_remains <= buffer.size()) {
                     argument_for_command = buffer.substr(0, arg_remains);
                     buffer.erase(0, arg_remains);
+                    _logger->debug("buffer after args {}, size = {}", buffer, buffer.size());
                     state = READY_TO_EXECUTE;
                 } else {
                     argument_for_command = buffer;
@@ -175,19 +186,26 @@ void ServerImpl::worker(int client_socket) {
                     buffer.clear();
                 }
             } else { // state == READY_TO_EXECUTE
+                _logger->debug("Executing command {} with args {}", parser.Name(), argument_for_command);
+                parsed_overall += arg_remains;
+                _logger->debug("Parsed overall: {}", parsed_overall);
                 std::string message;
                 try {
                     command_to_execute->Execute(*pStorage, argument_for_command, message);
                     message += "\r\n";
+                    _logger->debug("sending message {}", message);
                     send(client_socket, message.data(), message.size(), 0);
                 } catch (std::exception& ex) {
                     message = std::string("SERVER ERROR ") + ex.what() + "\r\n";
+                    _logger->debug("caught error with message {}", message);
                     send(client_socket, message.data(), message.size(), 0);
                 }
 
+                buffer.clear();
                 argument_for_command.clear();
                 command_to_execute.reset();
                 parser.Reset();
+                state = NEED_COMMAND;
             }
         }
     }

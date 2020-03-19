@@ -24,7 +24,7 @@ namespace MTblocking {
 class ServerImpl : public Server {
 public:
     ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);
-    ~ServerImpl() final;
+    ~ServerImpl() final = default;
 
     // See Server.h
     void Start(uint16_t port, uint32_t, uint32_t) override;
@@ -66,9 +66,6 @@ private:
 
     uint32_t max_workers;
     std::atomic<uint32_t> current_workers;
-
-
-    std::vector<std::thread*> workers;
 
     std::mutex connections_mutex;
     std::vector<int> opened_connections;

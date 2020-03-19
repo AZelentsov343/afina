@@ -32,10 +32,6 @@ namespace MTblocking {
 ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl), max_workers(0),
 running(false), _server_socket(0), current_workers(0) {}
 
-// See Server.h
-ServerImpl::~ServerImpl() {
-    workers.clear();
-}
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
@@ -262,7 +258,6 @@ void ServerImpl::OnRun() {
             }
             _logger->debug("creating new worker, now have {} workers", current_workers);
             std::thread new_tr(&ServerImpl::worker, this, client_socket);
-            workers.push_back(&new_tr);
             new_tr.detach();
         } else {
             _logger->debug("too many workers, closing connection {}", client_socket);

@@ -114,7 +114,7 @@ void ServerImpl::worker(int client_socket) {
     try {
         int readed_bytes = -1;
         char client_buffer[4096];
-        while ((readed_bytes = read(client_socket, client_buffer, sizeof(client_buffer))) > 0) {
+        while ((readed_bytes = read(client_socket, &client_buffer[readed_bytes], sizeof(client_buffer) - readed_bytes)) > 0) {
             _logger->debug("Got {} bytes from socket", readed_bytes);
 
             // Single block of data readed from the socket could trigger inside actions a multiple times,

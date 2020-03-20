@@ -188,8 +188,15 @@ void ServerImpl::worker(int client_socket) {
         _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
     }
 
+    {
+        std::unique_lock<std::mutex> lock(connections_mutex);
+        std::remove(opened_connections.begin(), opened_connections.end(), client_socket);
+        current_workers--;
+    }
+
     // We are done with this connection
     close(client_socket);
+    server_stopped.notify_one();
 
     // Prepare for the next command: just in case if connection was closed in the middle of executing something
     command_to_execute.reset();

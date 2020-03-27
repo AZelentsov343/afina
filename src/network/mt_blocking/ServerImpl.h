@@ -6,6 +6,7 @@
 #include <condition_variable>
 
 #include <afina/network/Server.h>
+#include <afina/concurrency/Executor.h>
 
 #include "protocol/Parser.h"
 
@@ -64,13 +65,7 @@ private:
     // Thread to run network on
     std::thread _thread;
 
-    uint32_t max_workers;
-    std::atomic<uint32_t> current_workers;
-
-    std::mutex connections_mutex;
-    std::vector<int> opened_connections;
-
-    std::condition_variable server_stopped;
+    std::unique_ptr<Afina::Concurrency::Executor> executor;
 
 };
 

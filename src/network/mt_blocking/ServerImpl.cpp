@@ -18,6 +18,7 @@
 #include <afina/Storage.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
+#include <afina/concurrency/Executor.h>
 
 #include "protocol/Parser.h"
 
@@ -27,13 +28,12 @@ namespace Network {
 namespace MTblocking {
 
 // See Server.h
-    ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)), max_workers(0),
-    running(false), _server_socket(0), current_workers(0) {}
+    ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)),
+    running(false), _server_socket(0) {}
 
 
 // See Server.h
     void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
-        max_workers = n_workers;
         _logger = pLogging->select("network");
         _logger->info("Start mt_blocking network service");
 
@@ -72,7 +72,13 @@ namespace MTblocking {
         }
 
         running.store(true);
-        current_workers.store(0);
+
+        executor.reset();
+        auto new_ex = std::unique_ptr<Afina::Concurrency::Executor>(new Afina::Concurrency::Executor(
+                2, n_workers, 50, 5000));
+        executor = std::move(new_ex);
+        executor->Start();
+
         _thread = std::thread(&ServerImpl::OnRun, this);
     }
 
@@ -81,10 +87,8 @@ namespace MTblocking {
         _logger->debug("Stopping server");
         running.store(false);
         shutdown(_server_socket, SHUT_RDWR);
-        for (auto socket : opened_connections) {
-            shutdown(socket, SHUT_RD);
-        }
-        _logger->debug("shut down all sockets");
+        _logger->debug("stopping executor");
+        executor->Stop(true);
     }
 
 // See Server.h
@@ -92,14 +96,6 @@ namespace MTblocking {
         close(_server_socket);
         assert(_thread.joinable());
         _thread.join();
-        _logger->debug("waiting current_workers == 0");
-        {
-            std::unique_lock<std::mutex> lock(connections_mutex);
-            while (current_workers != 0) {
-                server_stopped.wait(lock);
-            }
-        }
-        _logger->debug("all workers dead, goodbye");
     }
 
     void ServerImpl::worker(int client_socket) {
@@ -192,15 +188,8 @@ namespace MTblocking {
         delete[] client_buffer;
 
         // We are done with this connection
-
-        _logger->debug("Connection {} closed", client_socket);
-        {
-            std::unique_lock<std::mutex> lock(connections_mutex);
-            std::remove(opened_connections.begin(), opened_connections.end(), client_socket);
-            current_workers--;
-        }
         close(client_socket);
-        server_stopped.notify_one();
+        _logger->debug("Connection {} closed", client_socket);
     }
 
 // See Server.h
@@ -246,17 +235,7 @@ namespace MTblocking {
                 setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
             }
 
-            if (current_workers < max_workers) {
-                {
-                    std::unique_lock<std::mutex> lock(connections_mutex);
-                    opened_connections.push_back(client_socket);
-                    current_workers++;
-                }
-                _logger->debug("creating new worker, now have {} workers", current_workers);
-                std::thread new_tr(&ServerImpl::worker, this, client_socket);
-                new_tr.detach();
-            } else {
-                _logger->debug("too many workers, closing connection {}", client_socket);
+            if (not executor->Execute(&ServerImpl::worker, this, client_socket)) {
                 close(client_socket);
             }
 

@@ -3,14 +3,11 @@
 
 #include <atomic>
 #include <thread>
-#include <condition_variable>
 
 #include <afina/network/Server.h>
 
-#include "protocol/Parser.h"
-
 namespace spdlog {
-class logger;
+    class logger;
 }
 
 namespace Afina {
@@ -18,61 +15,44 @@ namespace Network {
 namespace MTblocking {
 
 /**
- * # Network resource manager implementation
- * Server that is spawning a separate thread for each connection
- */
-class ServerImpl : public Server {
-public:
-    ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);
-    ~ServerImpl() final = default;
+* # Network resource manager implementation
+* Server that is spawning a separate thread for each connection
+*/
+    class ServerImpl : public Server {
+    public:
+        ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);
+        ~ServerImpl();
 
-    // See Server.h
-    void Start(uint16_t port, uint32_t, uint32_t) override;
+        // See Server.h
+        void Start(uint16_t port, uint32_t, uint32_t) override;
 
-    // See Server.h
-    void Stop() override;
+        // See Server.h
+        void Stop() override;
 
-    // See Server.h
-    void Join() override;
+        // See Server.h
+        void Join() override;
 
-protected:
-    /**
-     * Method is running in the connection acceptor thread
-     */
-    void OnRun();
+    protected:
+        /**
+         * Method is running in the connection acceptor thread
+         */
+        void OnRun();
 
-private:
+    private:
+        // Logger instance
+        std::shared_ptr<spdlog::logger> _logger;
 
-    enum WorkerStates {
-        NEED_COMMAND,
-        NEED_ARGS,
-        READY_TO_EXECUTE
+        // Atomic flag to notify threads when it is time to stop. Note that
+        // flag must be atomic in order to safely publisj changes cross thread
+        // bounds
+        std::atomic<bool> running;
+
+        // Server socket to accept connections on
+        int _server_socket;
+
+        // Thread to run network on
+        std::thread _thread;
     };
-
-    void worker(int client_socket);
-    // Logger instance
-    std::shared_ptr<spdlog::logger> _logger;
-
-    // Atomic flag to notify threads when it is time to stop. Note that
-    // flag must be atomic in order to safely publisj changes cross thread
-    // bounds
-    std::atomic<bool> running;
-
-    // Server socket to accept connections on
-    int _server_socket;
-
-    // Thread to run network on
-    std::thread _thread;
-
-    uint32_t max_workers;
-    std::atomic<uint32_t> current_workers;
-
-    std::mutex connections_mutex;
-    std::vector<int> opened_connections;
-
-    std::condition_variable server_stopped;
-
-};
 
 } // namespace MTblocking
 } // namespace Network

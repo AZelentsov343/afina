@@ -62,8 +62,8 @@ namespace Backend {
         while (_cur_size + value.size() - node_found.value.size() > _max_size) { //deleting lru
             delete_lru();
         }
-        node_found.value = value;
         _cur_size = _cur_size + value.size() - node_found.value.size();
+        node_found.value = value;
 
         return true;
     }

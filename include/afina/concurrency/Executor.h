@@ -20,14 +20,10 @@ class Executor {
     using GetMutex = std::unique_lock<std::mutex>;
 public:
 
-    Executor(int low_watermark, int high_watermark, int max_queue_size, int idle_time) : low_watermark(low_watermark),
-            high_watermark(high_watermark), max_queue_size(max_queue_size), idle_time(idle_time),
-            state(State::kStopped), resting_workers(0), workers(0) {};
+    Executor(int low_watermark, int high_watermark, int max_queue_size, int idle_time);
 
 
-    ~Executor() {
-        this->Stop(true);
-    };
+    ~Executor();
 
     // No copy/move/assign allowed
     Executor(const Executor &) = delete;
@@ -40,21 +36,7 @@ public:
      * throws runtime_error if thread pool is already started
      * begins low_watermark threads
      */
-     void Start() {
-        {
-            GetMutex lock(mutex);
-            if (state != State::kStopped) {
-                throw std::runtime_error("you are trying to start Executor which is already running");
-            }
-        }
-        state = State::kRun;
-        for (int i = 0; i < low_watermark; ++i) {
-           std::thread new_tr = std::thread(&Executor::perform, this);
-           workers++;
-           resting_workers++;
-           new_tr.detach();
-        }
-     }
+     void Start();
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -62,19 +44,7 @@ public:
      *
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
-    void Stop(bool await = false) {
-        GetMutex lock(mutex);
-        if (state == State::kStopped) {
-            return;
-        }
-        state = State::kStopping;
-        empty_condition.notify_all();
-        if (await) {
-            while (state != State::kStopped) {
-                wait_threads.wait(lock);
-            }
-        }
-    }
+    void Stop(bool await = false);
 
     /**
      * Add function to be executed on the threadpool. Method returns true in case if task has been placed
@@ -107,50 +77,6 @@ public:
         return true;
     }
 
-
-    void perform() {
-        while (true) {
-            GetMutex lock(mutex);
-            if (not tasks.empty() && state == State::kRun) {
-                auto task = tasks.front();
-                tasks.pop_front();
-                resting_workers--;
-                lock.unlock();
-                task();
-                lock.lock();
-                resting_workers++;
-            } else if (tasks.empty() && state == State::kRun) {
-                if (empty_condition.wait_for(lock, std::chrono::milliseconds(idle_time)) ==
-                std::cv_status::timeout) {
-                    if (workers > low_watermark) {
-                        workers--;
-                        resting_workers--;
-                        return;
-                    }
-                }
-            } else if (not tasks.empty() && state == State::kStopping) {
-                auto task = tasks.front();
-                tasks.pop_front();
-                resting_workers--;
-                lock.unlock();
-                task();
-                lock.lock();
-                resting_workers++;
-                empty_condition.notify_all();
-            } else if (tasks.empty() && state == State::kStopping) {
-                workers--;
-                resting_workers--;
-                empty_condition.notify_all();
-                if (workers == 0) {
-                    state = State::kStopped;
-                    wait_threads.notify_one();
-                }
-                return;
-            }
-        }
-    }
-
-
 private:
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
@@ -166,6 +92,7 @@ private:
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
+    void perform();
 
     int low_watermark;
 

@@ -7,7 +7,7 @@
 #include <afina/network/Server.h>
 
 namespace spdlog {
-    class logger;
+class logger;
 }
 
 namespace Afina {
@@ -15,9 +15,9 @@ namespace Network {
 namespace MTblocking {
 
 /**
-* # Network resource manager implementation
-* Server that is spawning a separate thread for each connection
-*/
+ * # Network resource manager implementation
+ * Server that is spawning a separate thread for each connection
+ */
 class ServerImpl : public Server {
 public:
     ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);

@@ -29,7 +29,7 @@ void Connection::OnClose() {
 
 // See Connection.h
 void Connection::DoRead() {
-    _logger->debug("Do read on {} socket", _socket);
+    _logger->debug("Reading on {} connection", _socket);
 
     try {
         int read_count;

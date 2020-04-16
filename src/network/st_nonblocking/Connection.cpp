@@ -53,7 +53,7 @@ void Connection::DoRead() {
                             }
                         }
                     } catch (std::runtime_error &ex) {
-                        queue.emplace_back("(?^u:ERROR)");
+                        queue.emplace_back("ERROR");
                         _event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
                         throw std::runtime_error(ex.what());
                     }

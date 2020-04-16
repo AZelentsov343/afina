@@ -44,7 +44,7 @@ private:
     friend class ServerImpl;
 
     int _socket;
-    struct epoll_event _event;
+    struct epoll_event _event{};
     std::shared_ptr<Afina::Storage> &pStorage;
     std::shared_ptr<spdlog::logger> &_logger;
     bool is_alive;

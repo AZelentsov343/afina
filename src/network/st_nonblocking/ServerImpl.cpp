@@ -151,7 +151,7 @@ void ServerImpl::OnRun() {
                 if (current_event.events & EPOLLIN) {
                     pc->DoRead();
                 }
-                if (current_event.events & EPOLLOUT) {
+                if (pc->_event.events & EPOLLOUT) {
                     pc->DoWrite();
                 }
             }
@@ -201,13 +201,13 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         // Print host and service info.
         char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
         int retval =
-            getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
+                getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
         if (retval == 0) {
             _logger->info("Accepted connection on descriptor {} (host={}, port={})\n", infd, hbuf, sbuf);
         }
 
         // Register the new FD to be monitored by epoll.
-        Connection *pc = new(std::nothrow) Connection(infd);
+        Connection *pc = new (std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }

@@ -4,7 +4,6 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
-#include <algorithm>
 
 #include <netdb.h>
 #include <netinet/in.h>
@@ -27,11 +26,16 @@ namespace Network {
 namespace MTblocking {
 
 // See Server.h
+
     ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)),
     _max_workers(0), _running(false), _server_socket(0), _current_workers(0) {}
 
 
 // See Server.h
+ServerImpl::~ServerImpl() {}
+
+// See Server.h
+
     void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
         _max_workers = n_workers;
         _logger = pLogging->select("network");
@@ -43,6 +47,7 @@ namespace MTblocking {
         if (pthread_sigmask(SIG_BLOCK, &sig_mask, nullptr) != 0) {
             throw std::runtime_error("Unable to mask SIGPIPE");
         }
+
 
         struct sockaddr_in server_addr{};
         std::memset(&server_addr, 0, sizeof(server_addr));
@@ -230,6 +235,7 @@ namespace MTblocking {
                 continue;
             }
 
+
             // Got new connection
             if (_logger->should_log(spdlog::level::debug)) {
                 std::string host = "unknown", port = "-1";
@@ -242,6 +248,7 @@ namespace MTblocking {
                 }
                 _logger->debug("Accepted connection on descriptor {} (host={}, port={})\n", client_socket, host, port);
             }
+
 
             // Configure read timeout
             {
@@ -270,6 +277,7 @@ namespace MTblocking {
         // Cleanup on exit...
         _logger->warn("Network stopped");
     }
+
 
 
 

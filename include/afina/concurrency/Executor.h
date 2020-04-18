@@ -17,7 +17,7 @@ namespace Concurrency {
  */
 class Executor {
     using Task = std::function<void ()>;
-    using GetMutex = std::unique_lock<std::mutex>;
+    using MutexGetter = std::unique_lock<std::mutex>;
 public:
 
     Executor(int low_watermark, int high_watermark, int max_queue_size, int idle_time);
@@ -25,11 +25,6 @@ public:
 
     ~Executor();
 
-    // No copy/move/assign allowed
-    Executor(const Executor &) = delete;
-    Executor(Executor &&) = delete;
-    Executor &operator=(const Executor &) = delete;
-    Executor &operator=(Executor &&) = delete;
 
     /**
      * Start thread pool;
@@ -57,7 +52,7 @@ public:
         // Prepare "task"
         Task exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(this->_mutex);
+        MutexGetter lock(_mutex);
         if (_state != State::kRun) {
             return false;
         }

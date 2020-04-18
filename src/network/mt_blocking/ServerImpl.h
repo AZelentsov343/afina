@@ -44,12 +44,6 @@ protected:
 
 private:
 
-    enum WorkerStates {
-        NEED_COMMAND,
-        NEED_ARGS,
-        READY_TO_EXECUTE
-    };
-
     void worker(int client_socket);
     // Logger instance
     std::shared_ptr<spdlog::logger> _logger;
@@ -57,7 +51,7 @@ private:
     // Atomic flag to notify threads when it is time to stop. Note that
     // flag must be atomic in order to safely publisj changes cross thread
     // bounds
-    std::atomic<bool> running;
+    std::atomic<bool> _running;
 
     // Server socket to accept connections on
     int _server_socket;
@@ -65,7 +59,7 @@ private:
     // Thread to run network on
     std::thread _thread;
 
-    std::unique_ptr<Afina::Concurrency::Executor> executor;
+    std::unique_ptr<Afina::Concurrency::Executor> _executor;
 
 };
 

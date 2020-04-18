@@ -29,7 +29,7 @@ namespace MTblocking {
 
 // See Server.h
     ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)),
-    running(false), _server_socket(0) {}
+    _running(false), _server_socket(0) {}
 
 
 // See Server.h
@@ -44,7 +44,7 @@ namespace MTblocking {
             throw std::runtime_error("Unable to mask SIGPIPE");
         }
 
-        struct sockaddr_in server_addr;
+        struct sockaddr_in server_addr{};
         std::memset(&server_addr, 0, sizeof(server_addr));
         server_addr.sin_family = AF_INET;         // IPv4
         server_addr.sin_port = htons(port);       // TCP port number
@@ -71,13 +71,13 @@ namespace MTblocking {
             throw std::runtime_error("Socket listen() failed");
         }
 
-        running.store(true);
+        _running.store(true);
 
-        executor.reset();
+        _executor.reset();
         auto new_ex = std::unique_ptr<Afina::Concurrency::Executor>(new Afina::Concurrency::Executor(
                 2, n_workers, 50, 5000));
-        executor = std::move(new_ex);
-        executor->Start();
+        _executor = std::move(new_ex);
+        _executor->Start();
 
         _thread = std::thread(&ServerImpl::OnRun, this);
     }
@@ -85,10 +85,10 @@ namespace MTblocking {
 // See Server.h
     void ServerImpl::Stop() {
         _logger->debug("Stopping server");
-        running.store(false);
+        _running.store(false);
         shutdown(_server_socket, SHUT_RDWR);
         _logger->debug("stopping executor");
-        executor->Stop(true);
+        _executor->Stop(true);
     }
 
 // See Server.h
@@ -108,12 +108,14 @@ namespace MTblocking {
         Protocol::Parser parser;
         std::string argument_for_command;
         std::unique_ptr<Execute::Command> command_to_execute;
-        char *client_buffer = new char[256]();
 
         try {
             int readed_bytes = 0;
-            while ((readed_bytes += read(client_socket, client_buffer + readed_bytes, sizeof(client_buffer) - readed_bytes)) > 0) {
-                _logger->debug("Got {} bytes from socket", readed_bytes);
+            char client_buffer[4096] = "";
+            int bytes = 0;
+            while ((bytes = read(client_socket, client_buffer + readed_bytes, sizeof(client_buffer) - readed_bytes)) > 0) {
+                readed_bytes += bytes;
+                _logger->debug("Got {} bytes from socket", bytes);
 
                 // Single block of data readed from the socket could trigger inside actions a multiple times,
                 // for example:
@@ -185,7 +187,6 @@ namespace MTblocking {
         } catch (std::runtime_error &ex) {
             _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
         }
-        delete[] client_buffer;
 
         // We are done with this connection
         close(client_socket);
@@ -203,12 +204,12 @@ namespace MTblocking {
         //Protocol::Parser parser;
         //std::string argument_for_command;
         //std::unique_ptr<Execute::Command> command_to_execute;
-        while (running.load()) {
+        while (_running.load()) {
             _logger->debug("waiting for connection...");
 
             // The call to accept() blocks until the incoming connection arrives
             int client_socket;
-            struct sockaddr client_addr;
+            struct sockaddr client_addr{};
             socklen_t client_addr_len = sizeof(client_addr);
             if ((client_socket = accept(_server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
                 continue;
@@ -229,13 +230,13 @@ namespace MTblocking {
 
             // Configure read timeout
             {
-                struct timeval tv;
+                struct timeval tv{};
                 tv.tv_sec = 5; // TODO: make it configurable
                 tv.tv_usec = 0;
                 setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
             }
 
-            if (not executor->Execute(&ServerImpl::worker, this, client_socket)) {
+            if (not _executor->Execute(&ServerImpl::worker, this, client_socket)) {
                 close(client_socket);
             }
 

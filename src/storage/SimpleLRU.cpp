@@ -52,6 +52,22 @@ void SimpleLRU::move_node_tail(SimpleLRU::lru_node &node_found) {
     }
 }
 
+bool SimpleLRU::_set_anyway(lru_node& node_found, const std::string &value) {
+    move_node_tail(node_found);
+
+    if (node_found.key.size() + value.size() > _max_size) { //checking size
+        return false;
+    }
+
+    while (_cur_size + value.size() - node_found.value.size() > _max_size) { //deleting lru
+        delete_lru();
+    }
+    _cur_size = _cur_size + value.size() - node_found.value.size();
+    node_found.value = value;
+
+    return true;
+}
+
 bool SimpleLRU::_put_anyway(const std::string &key, const std::string &value) {
     size_t ovr_size = key.size() + value.size();
 
@@ -96,7 +112,8 @@ bool SimpleLRU::Put(const std::string &key, const std::string &value) {
     if (search == _lru_index.end()) {
         return _put_anyway(key, value);
     } else {
-        return Set(key, value);
+        lru_node& node_found = search->second.get();
+        return _set_anyway(node_found, value);
     }
 }
 
@@ -118,20 +135,7 @@ bool SimpleLRU::Set(const std::string &key, const std::string &value) {
         return false;
     }
     lru_node& node_found = search->second.get();
-
-    move_node_tail(node_found);
-
-
-    if (node_found.key.size() + value.size() > _max_size) { //checking size
-        return false;
-    }
-
-    while (_cur_size + value.size() - node_found.value.size() > _max_size) { //deleting lru
-        delete_lru();
-    }
-    node_found.value = value;
-
-    return true;
+    return _set_anyway(node_found, value);
 }
 
 // See MapBasedGlobalLockImpl.h

@@ -57,23 +57,23 @@ public:
         // Prepare "task"
         Task exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
+        std::unique_lock<std::mutex> lock(this->_mutex);
+        if (_state != State::kRun) {
             return false;
         }
 
-        if (resting_workers == 0 && workers < high_watermark) {
+        if (_resting_workers == 0 && _workers < _high_watermark) {
             auto new_tr = std::thread(&Executor::perform, this);
-            workers++;
-            resting_workers++;
+            _workers++;
+            _resting_workers++;
             new_tr.detach();
         }
-        if (tasks.size() == max_queue_size) {
+        if (_tasks.size() == _max_queue_size) {
             return false;
         }
         // Enqueue new task
-        tasks.push_back(exec);
-        empty_condition.notify_one();
+        _tasks.push_back(exec);
+        _empty_condition.notify_one();
         return true;
     }
 
@@ -94,43 +94,43 @@ private:
      */
     void perform();
 
-    int low_watermark;
+    int _low_watermark;
 
-    int high_watermark;
+    int _high_watermark;
 
-    int max_queue_size;
+    int _max_queue_size;
 
-    int idle_time;
+    int _idle_time;
 
     /**
      * Mutex to protect state below from concurrent modification
      */
-    std::mutex mutex;
+    std::mutex _mutex;
 
     /**
      * Conditional variable to await new data in case of empty queue
      */
-    std::condition_variable empty_condition;
+    std::condition_variable _empty_condition;
 
-    std::condition_variable wait_threads;
+    std::condition_variable _wait_threads;
     /**
      * Vector of actual threads that perorm execution
      */
-    std::vector<std::thread> threads;
+    std::vector<std::thread> _threads;
 
     /**
      * Task queue
      */
-    std::deque<Task> tasks;
+    std::deque<Task> _tasks;
 
     /**
      * Flag to stop bg threads
      */
-    State state;
+    State _state;
 
-    int resting_workers;
+    int _resting_workers;
 
-    int workers;
+    int _workers;
 
 };
 

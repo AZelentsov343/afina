@@ -205,7 +205,7 @@ namespace MTblocking {
             _current_workers--;
         }
         close(client_socket);
-        _server_stopped.notify_one();
+        _server_stopped.notify_all();
     }
 
 // See Server.h

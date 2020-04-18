@@ -9,33 +9,33 @@ namespace STnonblock {
 
 // See Connection.h
 void Connection::Start() {
-    _logger->debug("Connection {} started", _socket);
     _event.data.fd = _socket;
     _event.data.ptr = this;
     _event.events = EPOLLIN | EPOLLHUP | EPOLLERR;
+    _logger->debug("Connection {} started", _socket);
 }
 
 // See Connection.h
 void Connection::OnError() {
-    _logger->debug("Error on {} connection", _socket);
     _is_alive = false;
+    _logger->debug("Error on {} connection", _socket);
 }
 
 // See Connection.h
 void Connection::OnClose() {
-    _logger->debug("Connection {} closed", _socket);
     _is_alive = false;
+    _logger->debug("Connection {} closed", _socket);
 }
 
 // See Connection.h
 void Connection::DoRead() {
-    _logger->debug("Reading on {} connection", _socket);
+    _logger->debug("Reading on {} connection...", _socket);
 
     try {
-        int read_count;
-        while ((read_count = read(_socket, _read_buf + _read_bytes, sizeof(_read_buf) - _read_bytes)) > 0) {
-            _read_bytes += read_count;
-            _logger->debug("Got {} bytes from socket", read_count);
+        int bytes = -1;
+        while ((bytes = read(_socket, _read_buf + _read_bytes, sizeof(_read_buf) - _read_bytes)) > 0) {
+            _read_bytes += bytes;
+            _logger->debug("Got {} bytes from socket", bytes);
 
             while (_read_bytes > 0) {
                 _logger->debug("Process {} bytes", _read_bytes);
@@ -53,7 +53,7 @@ void Connection::DoRead() {
                             }
                         }
                     } catch (std::runtime_error &ex) {
-                        _queue.emplace_back("ERROR");
+                        _queue.emplace_back("(?^u:ERROR)");
                         _event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
                         throw std::runtime_error(ex.what());
                     }
@@ -100,7 +100,7 @@ void Connection::DoRead() {
                     _argument_for_command.resize(0);
                     _parser.Reset();
                 }
-            } // while (read_count)
+            }
         }
         _is_alive = false;
         if (_read_bytes == 0) {

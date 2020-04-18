@@ -24,7 +24,7 @@ public:
     ~ServerImpl();
 
     // See Server.h
-    void Start(uint16_t port, uint32_t, uint32_t) override;
+    void Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) override;
 
     // See Server.h
     void Stop() override;
@@ -39,19 +39,32 @@ protected:
     void OnRun();
 
 private:
+
+
+    void worker(int client_socket);
+
     // Logger instance
     std::shared_ptr<spdlog::logger> _logger;
 
     // Atomic flag to notify threads when it is time to stop. Note that
     // flag must be atomic in order to safely publisj changes cross thread
     // bounds
-    std::atomic<bool> running;
+    std::atomic<bool> _running;
 
     // Server socket to accept connections on
     int _server_socket;
 
     // Thread to run network on
     std::thread _thread;
+
+    uint32_t _max_workers;
+    std::atomic<uint32_t> _current_workers;
+
+    std::mutex _connections_mutex;
+    std::vector<int> _opened_connections;
+
+    std::condition_variable _server_stopped;
+
 };
 
 } // namespace MTblocking

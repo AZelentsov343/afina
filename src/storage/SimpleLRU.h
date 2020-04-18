@@ -60,6 +60,8 @@ private:
 
     bool _put_anyway(const std::string &key, const std::string &value);
 
+    bool _set_anyway(lru_node& node_found, const std::string &value);
+
     void delete_lru();
 
     void delete_node(lru_node& node_to_del);

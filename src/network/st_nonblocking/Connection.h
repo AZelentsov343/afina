@@ -18,19 +18,14 @@ namespace STnonblock {
 class Connection {
 public:
     Connection(int s, std::shared_ptr<Afina::Storage>& ps, std::shared_ptr<spdlog::logger>& pl) : _socket(s),
-    pStorage(ps), _logger(pl), read_bytes(0), written(0) {
-        arg_remains = 0;
-        read_buf = new char[512]();
+    pStorage(ps), _logger(pl), _read_bytes(0),_written(0) {
+        _arg_remains = 0;
         std::memset(&_event, 0, sizeof(struct epoll_event));
-        is_alive = true;
+        _is_alive = true;
         _event.data.ptr = this;
     }
 
-    ~Connection() {
-        delete[] read_buf;
-    }
-
-    inline bool isAlive() const { return is_alive; }
+    inline bool isAlive() const { return _is_alive; }
 
     void Start();
 
@@ -47,17 +42,17 @@ private:
     struct epoll_event _event{};
     std::shared_ptr<Afina::Storage> &pStorage;
     std::shared_ptr<spdlog::logger> &_logger;
-    bool is_alive;
+    bool _is_alive;
 
-    size_t read_bytes;
-    size_t written;
-    char* read_buf;
+    size_t _read_bytes;
+    size_t _written;
+    char _read_buf[4096] = "";
 
-    std::vector<std::string> queue;
-    std::size_t arg_remains;
-    Protocol::Parser parser;
-    std::string argument_for_command;
-    std::unique_ptr<Execute::Command> command_to_execute;
+    std::vector<std::string> _queue;
+    std::size_t _arg_remains;
+    Protocol::Parser _parser;
+    std::string _argument_for_command;
+    std::unique_ptr<Execute::Command> _command_to_execute;
 };
 
 } // namespace STnonblock

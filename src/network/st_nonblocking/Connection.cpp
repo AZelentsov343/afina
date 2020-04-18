@@ -18,13 +18,13 @@ void Connection::Start() {
 // See Connection.h
 void Connection::OnError() {
     _logger->debug("Error on {} connection", _socket);
-    is_alive = false;
+    _is_alive = false;
 }
 
 // See Connection.h
 void Connection::OnClose() {
     _logger->debug("Connection {} closed", _socket);
-    is_alive = false;
+    _is_alive = false;
 }
 
 // See Connection.h
@@ -33,27 +33,27 @@ void Connection::DoRead() {
 
     try {
         int read_count;
-        while ((read_count = read(_socket, read_buf + read_bytes, sizeof(read_buf) - read_bytes)) > 0) {
-            read_bytes += read_count;
+        while ((read_count = read(_socket, _read_buf + _read_bytes, sizeof(_read_buf) - _read_bytes)) > 0) {
+            _read_bytes += read_count;
             _logger->debug("Got {} bytes from socket", read_count);
 
-            while (read_bytes > 0) {
-                _logger->debug("Process {} bytes", read_bytes);
+            while (_read_bytes > 0) {
+                _logger->debug("Process {} bytes", _read_bytes);
                 // There is no command yet
-                if (!command_to_execute) {
+                if (!_command_to_execute) {
                     std::size_t parsed = 0;
                     try {
-                        if (parser.Parse(read_buf, read_bytes, parsed)) {
+                        if (_parser.Parse(_read_buf, _read_bytes, parsed)) {
                             // There is no command to be launched, continue to parse input stream
                             // Here we are, current chunk finished some command, process it
-                            _logger->debug("Found new command: {} in {} bytes", parser.Name(), parsed);
-                            command_to_execute = parser.Build(arg_remains);
-                            if (arg_remains > 0) {
-                                arg_remains += 2;
+                            _logger->debug("Found new command: {} in {} bytes", _parser.Name(), parsed);
+                            _command_to_execute = _parser.Build(_arg_remains);
+                            if (_arg_remains > 0) {
+                                _arg_remains += 2;
                             }
                         }
                     } catch (std::runtime_error &ex) {
-                        queue.emplace_back("ERROR");
+                        _queue.emplace_back("ERROR");
                         _event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
                         throw std::runtime_error(ex.what());
                     }
@@ -63,47 +63,47 @@ void Connection::DoRead() {
                     if (parsed == 0) {
                         break;
                     } else {
-                        std::memmove(read_buf, read_buf + parsed, read_bytes - parsed);
-                        read_bytes -= parsed;
+                        std::memmove(_read_buf, _read_buf + parsed, _read_bytes - parsed);
+                        _read_bytes -= parsed;
                     }
                 }
 
                 // There is command, but we still wait for argument to arrive...
-                if (command_to_execute && arg_remains > 0) {
-                    _logger->debug("Fill argument: {} bytes of {}", read_bytes, arg_remains);
+                if (_command_to_execute && _arg_remains > 0) {
+                    _logger->debug("Fill argument: {} bytes of {}", _read_bytes, _arg_remains);
                     // There is some parsed command, and now we are reading argument
-                    std::size_t to_read = std::min(arg_remains, std::size_t(read_bytes));
-                    argument_for_command.append(read_buf, to_read);
+                    std::size_t to_read = std::min(_arg_remains, std::size_t(_read_bytes));
+                    _argument_for_command.append(_read_buf, to_read);
 
-                    std::memmove(read_buf, read_buf + to_read, read_bytes - to_read);
-                    arg_remains -= to_read;
-                    read_bytes -= to_read;
+                    std::memmove(_read_buf, _read_buf + to_read, _read_bytes - to_read);
+                    _arg_remains -= to_read;
+                    _read_bytes -= to_read;
                 }
 
                 // There is command & argument - RUN!
-                if (command_to_execute && arg_remains == 0) {
+                if (_command_to_execute && _arg_remains == 0) {
                     _logger->debug("Start command execution");
 
                     std::string result;
-                    command_to_execute->Execute(*pStorage, argument_for_command, result);
+                    _command_to_execute->Execute(*pStorage, _argument_for_command, result);
 
                     // Send response
                     result += "\r\n";
 
-                    queue.emplace_back(result);
-                    if (queue.size() < 2) {
+                    _queue.emplace_back(result);
+                    if (_queue.size() < 2) {
                         _event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
                     }
 
                     // Prepare for the next command
-                    command_to_execute.reset();
-                    argument_for_command.resize(0);
-                    parser.Reset();
+                    _command_to_execute.reset();
+                    _argument_for_command.resize(0);
+                    _parser.Reset();
                 }
             } // while (read_count)
         }
-        is_alive = false;
-        if (read_bytes == 0) {
+        _is_alive = false;
+        if (_read_bytes == 0) {
             _logger->debug("Connection closed");
         } else {
             throw std::runtime_error(std::string(strerror(errno)));
@@ -116,17 +116,17 @@ void Connection::DoRead() {
 // See Connection.h
 void Connection::DoWrite() {
     _logger->debug("Writing on {} connection...", _socket);
-    auto iov = new iovec[queue.size()]();
+    auto iov = new iovec[_queue.size()]();
 
-    for (size_t i = 0; i < queue.size(); ++i) {
-        iov[i].iov_base = &(queue[i][0]);
-        iov[i].iov_len = queue[i].size();
+    for (size_t i = 0; i < _queue.size(); ++i) {
+        iov[i].iov_base = &(_queue[i][0]);
+        iov[i].iov_len = _queue[i].size();
     }
 
-    iov[0].iov_len -= written;
-    iov[0].iov_base = (char *)(iov[0].iov_base) + written;
+    iov[0].iov_len -= _written;
+    iov[0].iov_base = (char *)(iov[0].iov_base) + _written;
 
-    int written_bytes = writev(_socket, iov, queue.size());
+    int written_bytes = writev(_socket, iov, _queue.size());
 
     if (written_bytes == -1) {
         OnError();
@@ -134,7 +134,7 @@ void Connection::DoWrite() {
     }
 
     size_t done = 0;
-    for (auto& command : queue) {
+    for (auto& command : _queue) {
         if (written_bytes - command.size() < 0) {
             break;
         }
@@ -142,10 +142,10 @@ void Connection::DoWrite() {
         done++;
     }
 
-    queue.erase(queue.begin(), queue.begin() + done);
-    written = written_bytes;
+    _queue.erase(_queue.begin(), _queue.begin() + done);
+    _written = written_bytes;
 
-    if (queue.empty()) {
+    if (_queue.empty()) {
         _event.events = EPOLLIN | EPOLLERR | EPOLLHUP;
     }
     delete[] iov;

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <afina/network/Server.h>
+#include "Connection.h"
 
 namespace spdlog {
 class logger;
@@ -63,6 +64,10 @@ private:
 
     // threads serving read/write requests
     std::vector<Worker> _workers;
+
+    std::vector<Connection *> _connections;
+
+    std::mutex _mutex;
 };
 
 } // namespace MTnonblock

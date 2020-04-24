@@ -87,10 +87,13 @@ namespace MTblocking {
         _logger->debug("Stopping server");
         _running.store(false);
         shutdown(_server_socket, SHUT_RDWR);
-        for (int& socket : sockets) {
-            shutdown(_server_socket, SHUT_RD);
+        {
+            std::unique_lock<std::mutex> l(_sockets_mutex);
+            for (int &socket : sockets) {
+                shutdown(_server_socket, SHUT_RD);
+            }
+            sockets.clear();
         }
-        sockets.clear();
         _logger->debug("stopping executor");
     }
 

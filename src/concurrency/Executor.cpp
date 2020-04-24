@@ -46,7 +46,7 @@ void Executor::Stop(bool await) {
         while (_state != State::kStopped) {
             _wait_threads.wait(lock);
         }
-    } else {
+    } else if (_workers == 0) {
         _state = State::kStopped;
     }
 }

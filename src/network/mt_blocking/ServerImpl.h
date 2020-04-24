@@ -53,6 +53,8 @@ private:
     // bounds
     std::atomic<bool> _running;
 
+    std::mutex _sockets_mutex;
+
     // Server socket to accept connections on
     int _server_socket;
 

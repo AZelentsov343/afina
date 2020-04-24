@@ -15,44 +15,44 @@ namespace Backend {
  *
  *
  */
-class ThreadSafeSimplLRU : public SimpleLRU {
-public:
-    explicit ThreadSafeSimplLRU(size_t max_size = 1024) : SimpleLRU(max_size) {}
-    ~ThreadSafeSimplLRU() final {}
+    class ThreadSafeSimplLRU : public SimpleLRU {
+    public:
+        explicit ThreadSafeSimplLRU(size_t max_size = 1024) : SimpleLRU(max_size) {}
+        ~ThreadSafeSimplLRU() final {}
 
-    // see SimpleLRU.h
-    bool Put(const std::string &key, const std::string &value) override {
-        std::unique_lock<std::mutex> lock(global_mutex);
-        return SimpleLRU::Put(key, value);
-    }
+        // see SimpleLRU.h
+        bool Put(const std::string &key, const std::string &value) override {
+            std::unique_lock<std::mutex> lock(global_mutex);
+            return SimpleLRU::Put(key, value);
+        }
 
-    // see SimpleLRU.h
-    bool PutIfAbsent(const std::string &key, const std::string &value) override {
-        std::unique_lock<std::mutex> lock(global_mutex);
-        return SimpleLRU::PutIfAbsent(key, value);
-    }
+        // see SimpleLRU.h
+        bool PutIfAbsent(const std::string &key, const std::string &value) override {
+            std::unique_lock<std::mutex> lock(global_mutex);
+            return SimpleLRU::PutIfAbsent(key, value);
+        }
 
-    // see SimpleLRU.h
-    bool Set(const std::string &key, const std::string &value) override {
-        std::unique_lock<std::mutex> lock(global_mutex);
-        return SimpleLRU::Set(key, value);
-    }
+        // see SimpleLRU.h
+        bool Set(const std::string &key, const std::string &value) override {
+            std::unique_lock<std::mutex> lock(global_mutex);
+            return SimpleLRU::Set(key, value);
+        }
 
-    // see SimpleLRU.h
-    bool Delete(const std::string &key) override {
-        std::unique_lock<std::mutex> lock(global_mutex);
-        return SimpleLRU::Delete(key);
-    }
+        // see SimpleLRU.h
+        bool Delete(const std::string &key) override {
+            std::unique_lock<std::mutex> lock(global_mutex);
+            return SimpleLRU::Delete(key);
+        }
 
-    // see SimpleLRU.h
-    bool Get(const std::string &key, std::string &value) override {
-        std::unique_lock<std::mutex> lock(global_mutex);
-        return SimpleLRU::Get(key, value);
-    }
+        // see SimpleLRU.h
+        bool Get(const std::string &key, std::string &value) override {
+            std::unique_lock<std::mutex> lock(global_mutex);
+            return SimpleLRU::Get(key, value);
+        }
 
-private:
-    std::mutex global_mutex;
-};
+    private:
+        std::mutex global_mutex;
+    };
 
 } // namespace Backend
 } // namespace Afina

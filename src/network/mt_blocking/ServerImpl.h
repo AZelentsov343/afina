@@ -59,6 +59,8 @@ private:
     // Thread to run network on
     std::thread _thread;
 
+    std::vector<int> sockets;
+
     std::unique_ptr<Afina::Concurrency::Executor> _executor;
 
 };

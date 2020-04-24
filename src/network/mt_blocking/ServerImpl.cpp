@@ -87,12 +87,16 @@ namespace MTblocking {
         _logger->debug("Stopping server");
         _running.store(false);
         shutdown(_server_socket, SHUT_RDWR);
+        for (int& socket : sockets) {
+            shutdown(_server_socket, SHUT_RD);
+        }
+        sockets.clear();
         _logger->debug("stopping executor");
-        _executor->Stop(true);
     }
 
 // See Server.h
     void ServerImpl::Join() {
+        _executor->Stop(true);
         close(_server_socket);
         assert(_thread.joinable());
         _thread.join();
@@ -236,8 +240,10 @@ namespace MTblocking {
                 setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
             }
 
+            sockets.push_back(client_socket);
             if (not _executor->Execute(&ServerImpl::worker, this, client_socket)) {
                 close(client_socket);
+                sockets.erase(sockets.end() - 1, sockets.end());
             }
 
         }

@@ -17,6 +17,7 @@
 #include <afina/Storage.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
+#include <afina/concurrency/Executor.h>
 
 #include "protocol/Parser.h"
 
@@ -28,6 +29,10 @@ namespace MTblocking {
 // See Server.h
 
     ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)),
+    _running(false), _server_socket(0) {}
+
+
+    ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps), std::move(pl)),
     _max_workers(0), _running(false), _server_socket(0), _current_workers(0) {}
 
 
@@ -37,7 +42,7 @@ ServerImpl::~ServerImpl() {}
 // See Server.h
 
     void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
-        _max_workers = n_workers;
+      
         _logger = pLogging->select("network");
         _logger->info("Start mt_blocking network service");
 
@@ -77,7 +82,14 @@ ServerImpl::~ServerImpl() {}
         }
 
         _running.store(true);
-        _current_workers.store(0);
+
+        _executor.reset();
+        auto new_ex = std::unique_ptr<Afina::Concurrency::Executor>(new Afina::Concurrency::Executor(
+                2, n_workers, 50, 5000));
+        _executor = std::move(new_ex);
+        _executor->Start();
+
+
         _thread = std::thread(&ServerImpl::OnRun, this);
     }
 
@@ -87,27 +99,21 @@ ServerImpl::~ServerImpl() {}
         _running.store(false);
         shutdown(_server_socket, SHUT_RDWR);
         {
-            std::unique_lock<std::mutex> lock(_connections_mutex);
-            for (auto socket : _opened_connections) {
-                shutdown(socket, SHUT_RD);
+            std::unique_lock<std::mutex> l(_sockets_mutex);
+            for (int &socket : sockets) {
+                shutdown(_server_socket, SHUT_RD);
             }
+            sockets.clear();
         }
-        _logger->debug("shut down all sockets");
+        _logger->debug("stopping executor");
     }
 
 // See Server.h
     void ServerImpl::Join() {
+        _executor->Stop(true);
         close(_server_socket);
         assert(_thread.joinable());
         _thread.join();
-        _logger->debug("waiting current_workers == 0");
-        {
-            std::unique_lock<std::mutex> lock(_connections_mutex);
-            while (_current_workers != 0) {
-                _server_stopped.wait(lock);
-            }
-        }
-        _logger->debug("all workers dead, goodbye");
     }
 
     void ServerImpl::worker(int client_socket) {
@@ -125,8 +131,7 @@ ServerImpl::~ServerImpl() {}
             int readed_bytes = 0;
             char client_buffer[4096] = "";
             int bytes = 0;
-            while ((bytes = read(client_socket, client_buffer + readed_bytes,
-                    sizeof(client_buffer) - readed_bytes)) > 0) {
+            while ((bytes = read(client_socket, client_buffer + readed_bytes, sizeof(client_buffer) - readed_bytes)) > 0) {
                 readed_bytes += bytes;
                 _logger->debug("Got {} bytes from socket", bytes);
 
@@ -202,15 +207,8 @@ ServerImpl::~ServerImpl() {}
         }
 
         // We are done with this connection
-
-        _logger->debug("Connection {} closed", client_socket);
-        {
-            std::unique_lock<std::mutex> lock(_connections_mutex);
-            std::remove(_opened_connections.begin(), _opened_connections.end(), client_socket);
-            _current_workers--;
-        }
         close(client_socket);
-        _server_stopped.notify_all();
+        _logger->debug("Connection {} closed", client_socket);
     }
 
 // See Server.h
@@ -258,18 +256,10 @@ ServerImpl::~ServerImpl() {}
                 setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
             }
 
-            if (_current_workers < _max_workers) {
-                {
-                    std::unique_lock<std::mutex> lock(_connections_mutex);
-                    _opened_connections.push_back(client_socket);
-                    _current_workers++;
-                }
-                _logger->debug("creating new worker, now have {} workers", _current_workers);
-                std::thread new_tr(&ServerImpl::worker, this, client_socket);
-                new_tr.detach();
-            } else {
-                _logger->debug("too many workers, closing connection {}", client_socket);
+            sockets.push_back(client_socket);
+            if (not _executor->Execute(&ServerImpl::worker, this, client_socket)) {
                 close(client_socket);
+                sockets.erase(sockets.end() - 1, sockets.end());
             }
 
         }

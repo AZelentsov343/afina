@@ -5,6 +5,7 @@
 #include <thread>
 
 #include <afina/network/Server.h>
+#include <afina/concurrency/Executor.h>
 
 namespace spdlog {
 class logger;
@@ -40,7 +41,6 @@ protected:
 
 private:
 
-
     void worker(int client_socket);
 
     // Logger instance
@@ -51,19 +51,18 @@ private:
     // bounds
     std::atomic<bool> _running;
 
+    std::mutex _sockets_mutex;
+
+
     // Server socket to accept connections on
     int _server_socket;
 
     // Thread to run network on
     std::thread _thread;
 
-    uint32_t _max_workers;
-    std::atomic<uint32_t> _current_workers;
+    std::vector<int> sockets;
 
-    std::mutex _connections_mutex;
-    std::vector<int> _opened_connections;
-
-    std::condition_variable _server_stopped;
+    std::unique_ptr<Afina::Concurrency::Executor> _executor;
 
 };
 

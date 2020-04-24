@@ -16,20 +16,22 @@ namespace Concurrency {
  * # Thread pool
  */
 class Executor {
-    enum class State {
-        // Threadpool is fully operational, tasks could be added and get executed
-        kRun,
+    using Task = std::function<void ()>;
+    using MutexGetter = std::unique_lock<std::mutex>;
+public:
 
-        // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
-        // completed as requested
-        kStopping,
+    Executor(int low_watermark, int high_watermark, int max_queue_size, int idle_time);
 
-        // Threadppol is stopped
-        kStopped
-    };
 
-    Executor(std::string name, int size);
     ~Executor();
+
+
+    /**
+     * Start thread pool;
+     * throws runtime_error if thread pool is already started
+     * begins low_watermark threads
+     */
+     void Start();
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -48,56 +50,85 @@ class Executor {
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
         // Prepare "task"
-        auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
+        Task exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
+        MutexGetter lock(_mutex);
+        if (_state != State::kRun) {
             return false;
         }
 
+        if (_resting_workers == 0 && _workers < _high_watermark) {
+            auto new_tr = std::thread(&Executor::perform, this);
+            _workers++;
+            _resting_workers++;
+            new_tr.detach();
+        }
+        if (_tasks.size() == _max_queue_size) {
+            return false;
+        }
         // Enqueue new task
-        tasks.push_back(exec);
-        empty_condition.notify_one();
+        _tasks.push_back(exec);
+        _empty_condition.notify_one();
         return true;
     }
 
 private:
-    // No copy/move/assign allowed
-    Executor(const Executor &);            // = delete;
-    Executor(Executor &&);                 // = delete;
-    Executor &operator=(const Executor &); // = delete;
-    Executor &operator=(Executor &&);      // = delete;
+    enum class State {
+        // Threadpool is fully operational, tasks could be added and get executed
+                kRun,
 
+        // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
+        // completed as requested
+                kStopping,
+
+        // Threadppol is stopped
+                kStopped
+    };
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor);
+    void perform();
+
+    int _low_watermark;
+
+    int _high_watermark;
+
+    int _max_queue_size;
+
+    int _idle_time;
 
     /**
      * Mutex to protect state below from concurrent modification
      */
-    std::mutex mutex;
+    std::mutex _mutex;
 
     /**
      * Conditional variable to await new data in case of empty queue
      */
-    std::condition_variable empty_condition;
+    std::condition_variable _empty_condition;
 
+    std::condition_variable _wait_threads;
     /**
      * Vector of actual threads that perorm execution
      */
-    std::vector<std::thread> threads;
+    std::vector<std::thread> _threads;
 
     /**
      * Task queue
      */
-    std::deque<std::function<void()>> tasks;
+    std::deque<Task> _tasks;
 
     /**
      * Flag to stop bg threads
      */
-    State state;
+    State _state;
+
+    int _resting_workers;
+
+    int _workers;
+
 };
+
 
 } // namespace Concurrency
 } // namespace Afina

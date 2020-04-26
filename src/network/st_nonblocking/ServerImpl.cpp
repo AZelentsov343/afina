@@ -9,7 +9,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
+#include <csignal>
+#include <utility>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -29,10 +30,11 @@ namespace Network {
 namespace STnonblock {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(std::move(ps),
+        std::move(pl)) {}
 
 // See Server.h
-ServerImpl::~ServerImpl() {}
+ServerImpl::~ServerImpl() = default;
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
@@ -42,12 +44,12 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
     sigaddset(&sig_mask, SIGPIPE);
-    if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0) {
+    if (pthread_sigmask(SIG_BLOCK, &sig_mask, nullptr) != 0) {
         throw std::runtime_error("Unable to mask SIGPIPE");
     }
 
     // Create server socket
-    struct sockaddr_in server_addr;
+    struct sockaddr_in server_addr{};
     std::memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;         // IPv4
     server_addr.sin_port = htons(port);       // TCP port number
@@ -107,14 +109,14 @@ void ServerImpl::OnRun() {
         throw std::runtime_error("Failed to create epoll file descriptor: " + std::string(strerror(errno)));
     }
 
-    struct epoll_event event;
+    struct epoll_event event{};
     event.events = EPOLLIN;
     event.data.fd = _server_socket;
     if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _server_socket, &event)) {
         throw std::runtime_error("Failed to add file descriptor to epoll");
     }
 
-    struct epoll_event event2;
+    struct epoll_event event2{};
     event2.events = EPOLLIN;
     event2.data.fd = _event_fd;
     if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _event_fd, &event2)) {
@@ -122,7 +124,7 @@ void ServerImpl::OnRun() {
     }
 
     bool run = true;
-    std::array<struct epoll_event, 64> mod_list;
+    std::array<struct epoll_event, 64> mod_list{};
     while (run) {
         int nmod = epoll_wait(epoll_descr, &mod_list[0], mod_list.size(), -1);
         _logger->debug("Acceptor wokeup: {} events", nmod);
@@ -139,7 +141,7 @@ void ServerImpl::OnRun() {
             }
 
             // That is some connection!
-            Connection *pc = static_cast<Connection *>(current_event.data.ptr);
+            auto *pc = static_cast<Connection *>(current_event.data.ptr);
 
             auto old_mask = pc->_event.events;
             if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
@@ -151,7 +153,7 @@ void ServerImpl::OnRun() {
                 if (current_event.events & EPOLLIN) {
                     pc->DoRead();
                 }
-                if (current_event.events & EPOLLOUT) {
+                if (pc->_event.events & EPOLLOUT) {
                     pc->DoWrite();
                 }
             }
@@ -183,7 +185,7 @@ void ServerImpl::OnRun() {
 
 void ServerImpl::OnNewConnection(int epoll_descr) {
     for (;;) {
-        struct sockaddr in_addr;
+        struct sockaddr in_addr{};
         socklen_t in_len;
 
         // No need to make these sockets non blocking since accept4() takes care of it.
@@ -201,13 +203,13 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         // Print host and service info.
         char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
         int retval =
-            getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
+                getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
         if (retval == 0) {
             _logger->info("Accepted connection on descriptor {} (host={}, port={})\n", infd, hbuf, sbuf);
         }
 
         // Register the new FD to be monitored by epoll.
-        Connection *pc = new(std::nothrow) Connection(infd);
+        auto *pc = new (std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }

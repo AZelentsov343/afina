@@ -138,6 +138,10 @@ void ServerImpl::Join() {
     }
      _acceptors.clear();
 
+    for (auto &w : _workers) {
+        w.Join();
+    }
+
     _workers.clear();
     {
         std::lock_guard<std::mutex> l(_set_is_blocked);
@@ -228,7 +232,7 @@ void ServerImpl::OnRun() {
                         delete pc;
                     } else {
                         std::lock_guard<std::mutex> lock(_mutex);
-                        _connections.push_back(pc);
+                        _connections.insert(pc);
                     }
                 }
             }

@@ -3,6 +3,7 @@
 
 #include <thread>
 #include <vector>
+#include <unordered_set>
 
 #include <afina/network/Server.h>
 #include "Connection.h"

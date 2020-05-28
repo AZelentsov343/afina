@@ -25,7 +25,7 @@ class Worker;
 class ServerImpl : public Server {
 public:
     ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);
-    ~ServerImpl();
+    ~ServerImpl() final;
 
     // See Server.h
     void Start(uint16_t port, uint32_t acceptors, uint32_t workers) override;
@@ -36,9 +36,10 @@ public:
     // See Server.h
     void Join() override;
 
+    void delete_from_set(Connection *connection);
+
 protected:
     void OnRun();
-    void OnNewConnection();
 
 private:
     // logger to use
@@ -65,7 +66,8 @@ private:
     // threads serving read/write requests
     std::vector<Worker> _workers;
 
-    std::vector<Connection *> _connections;
+    std::unordered_set<Connection *> _connections;
+    std::mutex _set_is_blocked;
 
     std::mutex _mutex;
 };

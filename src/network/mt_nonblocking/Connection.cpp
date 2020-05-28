@@ -9,34 +9,33 @@ namespace MTnonblock {
 
 // See Connection.h
 void Connection::Start() {
-    MutexGetter lock(_mutex);
+    _logger->debug("Connection on {} socket started", _socket);
     _event.data.fd = _socket;
     _event.data.ptr = this;
-    _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
-    _logger->debug("Connection {} started", _socket);
+    _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET; // edge-triggered
 }
 
 // See Connection.h
 void Connection::OnError() {
-    _is_alive.store(false);
-    _logger->debug("Error on {} connection", _socket);
+    _logger->warn("Connection on {} socket has error", _socket);
+    _is_alive.store(false, std::memory_order_relaxed);
 }
 
 // See Connection.h
 void Connection::OnClose() {
-    _is_alive.store(false);
-    _logger->debug("Connection {} closed", _socket);
+    _logger->debug("Connection on {} socket closed", _socket);
+    _is_alive.store(false, std::memory_order_relaxed);
 }
 
 // See Connection.h
 void Connection::DoRead() {
-    _logger->debug("Reading on {} connection...", _socket);
-    MutexGetter lock(_mutex);
+    _logger->debug("Do read on {} socket", _socket);
+    std::atomic_thread_fence(std::memory_order_acquire);
     try {
-        int bytes;
-        while ((bytes = read(_socket, _read_buf + _read_bytes, sizeof(_read_buf) - _read_bytes)) > 0) {
-            _read_bytes += bytes;
-            _logger->debug("Got {} bytes from socket", bytes);
+        int read_count = -1;
+        while ((read_count = read(_socket, _read_buffer + _read_bytes, sizeof(_read_buffer) - _read_bytes)) > 0) {
+            _read_bytes += read_count;
+            _logger->debug("Got {} bytes from socket", read_count);
 
             while (_read_bytes > 0) {
                 _logger->debug("Process {} bytes", _read_bytes);
@@ -44,7 +43,7 @@ void Connection::DoRead() {
                 if (!_command_to_execute) {
                     std::size_t parsed = 0;
                     try {
-                        if (_parser.Parse(_read_buf, _read_bytes, parsed)) {
+                        if (_parser.Parse(_read_buffer, _read_bytes, parsed)) {
                             // There is no command to be launched, continue to parse input stream
                             // Here we are, current chunk finished some command, process it
                             _logger->debug("Found new command: {} in {} bytes", _parser.Name(), parsed);
@@ -54,8 +53,8 @@ void Connection::DoRead() {
                             }
                         }
                     } catch (std::runtime_error &ex) {
-                        _queue.emplace_back("(?^u:ERROR)");
-                        _event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
+                        _output_queue.emplace_back("(?^u:ERROR)");
+                        _event.events |= EPOLLOUT;
                         throw std::runtime_error(ex.what());
                     }
 
@@ -64,7 +63,7 @@ void Connection::DoRead() {
                     if (parsed == 0) {
                         break;
                     } else {
-                        std::memmove(_read_buf, _read_buf + parsed, _read_bytes - parsed);
+                        std::memmove(_read_buffer, _read_buffer + parsed, _read_bytes - parsed);
                         _read_bytes -= parsed;
                     }
                 }
@@ -74,9 +73,9 @@ void Connection::DoRead() {
                     _logger->debug("Fill argument: {} bytes of {}", _read_bytes, _arg_remains);
                     // There is some parsed command, and now we are reading argument
                     std::size_t to_read = std::min(_arg_remains, std::size_t(_read_bytes));
-                    _argument_for_command.append(_read_buf, to_read);
+                    _argument_for_command.append(_read_buffer, to_read);
 
-                    std::memmove(_read_buf, _read_buf + to_read, _read_bytes - to_read);
+                    std::memmove(_read_buffer, _read_buffer + to_read, _read_bytes - to_read);
                     _arg_remains -= to_read;
                     _read_bytes -= to_read;
                 }
@@ -86,13 +85,13 @@ void Connection::DoRead() {
                     _logger->debug("Start command execution");
 
                     std::string result;
-                    _command_to_execute->Execute(*pStorage, _argument_for_command, result);
+                    _command_to_execute->Execute(*_pStorage, _argument_for_command, result);
 
                     // Send response
                     result += "\r\n";
 
-                    _queue.emplace_back(result);
-                    if (_queue.size() < 2) {
+                    _output_queue.push_back(result);
+                    if (_output_queue.size() == 1) {
                         _event.events |= EPOLLOUT;
                     }
 
@@ -102,56 +101,65 @@ void Connection::DoRead() {
                     _parser.Reset();
                 }
             }
-        }
-        _is_alive.store(false);
+        } // while (read_count)
         if (_read_bytes == 0) {
             _logger->debug("Connection closed");
+            _data_available.store(true, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
         } else {
             throw std::runtime_error(std::string(strerror(errno)));
         }
     } catch (std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
+        _data_available.store(true, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
     }
 }
 
 // See Connection.h
 void Connection::DoWrite() {
-    _logger->debug("Writing on {} connection...", _socket);
-    MutexGetter lock(_mutex);
-    _logger->debug("Got mutex for writing");
-    auto iov = new iovec[_queue.size()]();
-
-    for (size_t i = 0; i < _queue.size(); ++i) {
-        iov[i].iov_base = &(_queue[i][0]);
-        iov[i].iov_len = _queue[i].size();
-    }
-
-    iov[0].iov_len -= _written;
-    iov[0].iov_base = (char *)(iov[0].iov_base) + _written;
-
-    int written_bytes = writev(_socket, iov, _queue.size());
-
-    if (written_bytes == 0 or written_bytes == -1) {
-        OnError();
+    _logger->debug("Do write on {} socket", _socket);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (!_data_available.load(std::memory_order_relaxed)) {
         return;
     }
+    struct iovec tmp[_output_queue.size()];
+    size_t i;
+    for (i = 0; i < _output_queue.size(); ++i) {
+        tmp[i].iov_base = &(_output_queue[i][0]);
+        tmp[i].iov_len = _output_queue[i].size();
+    }
 
-    size_t done = 0;
-    for (auto& command : _queue) {
-        if (written_bytes - command.size() < 0) {
+    tmp[0].iov_base = static_cast<char *>(tmp[0].iov_base) + _head_written_count;
+    tmp[0].iov_len -= _head_written_count;
+
+    int written_bytes = writev(_socket, tmp, i);
+
+    if (written_bytes <= 0) {
+        if (errno != EINTR && errno != EAGAIN && errno != EPIPE) {
+            _is_alive.store(false, std::memory_order_release);
+        }
+        throw std::runtime_error("Failed to send response");
+    }
+
+    i = 0;
+    for (const auto& command : _output_queue) {
+        if (written_bytes - command.size() >= 0) {
+            ++i;
+            written_bytes -= command.size();
+        } else {
             break;
         }
-        written_bytes -= command.size();
-        done++;
     }
 
-    _queue.erase(_queue.begin(), _queue.begin() + done);
-    _written = written_bytes;
+    _output_queue.erase(_output_queue.begin(), _output_queue.begin() + i);
+    _head_written_count = written_bytes;
 
-    if (_queue.empty()) {
-        _event.events = EPOLLET | EPOLLIN | EPOLLERR | EPOLLHUP;
+    if (_output_queue.empty()) {
+        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
+        _is_alive.store(false, std::memory_order_relaxed);
     }
-    delete[] iov;
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
 } // namespace MTnonblock

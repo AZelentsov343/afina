@@ -17,16 +17,16 @@ namespace MTnonblock {
 
 class Connection {
 public:
-    using MutexGetter = std::unique_lock<std::mutex>;
     Connection(int s, std::shared_ptr<Afina::Storage>& ps, std::shared_ptr<spdlog::logger>& pl) : _socket(s),
-    pStorage(ps), _logger(pl), _read_bytes(0),_written(0) {
-        _arg_remains = 0;
+    _pStorage(ps), _logger(pl) {
         std::memset(&_event, 0, sizeof(struct epoll_event));
-        _is_alive.store(true);
+        _is_alive.store(true, std::memory_order_release);
+        _data_available.store(false, std::memory_order_release);
+        _read_bytes = _head_written_count = 0;
         _event.data.ptr = this;
     }
 
-    inline bool isAlive() const { return _is_alive; }
+    inline bool isAlive() const { return _is_alive.load(std::memory_order_acquire); }
 
     void Start();
 
@@ -40,19 +40,20 @@ private:
     friend class ServerImpl;
     friend class Worker;
 
+    std::atomic<bool> _is_alive; // for atomic change of a variable
+    std::atomic<bool> _data_available;
+
     int _socket;
-    struct epoll_event _event{};
-    std::shared_ptr<Afina::Storage> &pStorage;
-    std::shared_ptr<spdlog::logger> &_logger;
-    std::atomic<bool> _is_alive;
+    struct epoll_event _event;
 
+    std::vector<std::string> _output_queue;
+    char _read_buffer[4096];
     size_t _read_bytes;
-    size_t _written;
-    char _read_buf[4096] = "";
+    int _head_written_count;
+    std::shared_ptr<spdlog::logger> _logger;
+    std::shared_ptr<Afina::Storage> _pStorage;
 
-    std::mutex _mutex;
-
-    std::vector<std::string> _queue;
+    // variables for parser
     std::size_t _arg_remains;
     Protocol::Parser _parser;
     std::string _argument_for_command;

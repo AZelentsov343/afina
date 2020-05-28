@@ -6,6 +6,7 @@
 
 #include <netdb.h>
 #include <sys/epoll.h>
+#include "ServerImpl.h"
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -21,8 +22,8 @@ namespace Network {
 namespace MTnonblock {
 
 // See Worker.h
-Worker::Worker(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl)
-    : _pStorage(ps), _pLogging(pl), isRunning(false), _epoll_fd(-1) {
+Worker::Worker(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl,  ServerImpl *server)
+        : _pStorage(ps), _pLogging(pl), _server(server), isRunning(false), _epoll_fd(-1) {
     // TODO: implementation here
 }
 
@@ -122,7 +123,7 @@ void Worker::OnRun() {
                     _logger->debug("epoll_ctl failed during connection rearm: error {}", epoll_ctl_retval);
                     pconn->OnError();
                     close(pconn->_socket);
-                    delete pconn;
+                    _server->delete_from_set(pconn);
                 }
             }
             // Or delete closed one
@@ -131,7 +132,7 @@ void Worker::OnRun() {
                     std::cerr << "Failed to delete connection!" << std::endl;
                 }
                 close(pconn->_socket);
-                delete pconn;
+                _server->delete_from_set(pconn);
             }
         }
         // TODO: Select timeout...

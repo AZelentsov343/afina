@@ -129,29 +129,30 @@ void ServerImpl::Stop() {
         }
     }
     shutdown(_server_socket, SHUT_RDWR);
+    close(_server_socket);
 }
 
 // See Server.h
 void ServerImpl::Join() {
-    for (auto &t : _acceptors) {
-        t.join();
-    }
-     _acceptors.clear();
-
-    for (auto &w : _workers) {
-        w.Join();
-    }
-
-    _workers.clear();
     {
         std::lock_guard<std::mutex> l(_set_is_blocked);
+        for (auto &t : _acceptors) {
+            t.join();
+        }
+        _acceptors.clear();
+
+        for (auto &w : _workers) {
+            w.Join();
+        }
+
+        _workers.clear();
+
         for (auto connection : _connections) {
             close(connection->_socket);
             delete connection;
         }
         _connections.clear();
     }
-    close(_server_socket);
 }
 
 // See ServerImpl.h

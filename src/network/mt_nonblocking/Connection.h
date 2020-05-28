@@ -47,7 +47,7 @@ private:
     struct epoll_event _event;
 
     std::vector<std::string> _output_queue;
-    char _read_buffer[4096];
+    char _read_buffer[4096] = "";
     size_t _read_bytes;
     int _head_written_count;
     std::shared_ptr<spdlog::logger> _logger;

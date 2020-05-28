@@ -124,7 +124,7 @@ void Connection::DoWrite() {
         return;
     }
     struct iovec tmp[_output_queue.size()];
-    size_t i;
+    size_t i = 0;
     for (i = 0; i < _output_queue.size(); ++i) {
         tmp[i].iov_base = &(_output_queue[i][0]);
         tmp[i].iov_len = _output_queue[i].size();

@@ -92,40 +92,30 @@ void Worker::OnRun() {
             }
 
             // Some connection gets new data
-            Connection *pconn = static_cast<Connection *>(current_event.data.ptr);
+            auto *pconn = static_cast<Connection *>(current_event.data.ptr);
             if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
                 _logger->debug("Got EPOLLERR or EPOLLHUP, value of returned events: {}", current_event.events);
                 pconn->OnError();
             } else if (current_event.events & EPOLLRDHUP) {
                 _logger->debug("Got EPOLLRDHUP, value of returned events: {}", current_event.events);
                 pconn->OnClose();
-            } else {
-                // Depends on what connection wants...
-                if (current_event.events & EPOLLIN) {
-                    _logger->trace("Got EPOLLIN");
-                    pconn->DoRead();
-                }
-                if (pconn->_event.events & EPOLLOUT) {
-                    _logger->trace("Got EPOLLOUT");
-                    pconn->DoWrite();
-                }
             }
-
-            // Rearm connection
+            if (pconn->_event.events & EPOLLOUT) {
+                pconn->DoWrite();
+            }
+            if (current_event.events & EPOLLIN) {
+                pconn->DoRead();
+            }
             if (pconn->isAlive()) {
                 pconn->_event.events |= EPOLLONESHOT;
-                int epoll_ctl_retval;
-                if ((epoll_ctl_retval = epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, pconn->_socket, &pconn->_event))) {
-                    _logger->debug("epoll_ctl failed during connection rearm: error {}", epoll_ctl_retval);
+                if (epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, pconn->_socket, &pconn->_event)) {
                     pconn->OnError();
                     close(pconn->_socket);
                     _server->delete_from_set(pconn);
                 }
-            }
-            // Or delete closed one
-            else {
+            } else {
                 if (epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, pconn->_socket, &pconn->_event)) {
-                    std::cerr << "Failed to delete connection!" << std::endl;
+                    std::cerr << "ERROR" << std::endl;
                 }
                 close(pconn->_socket);
                 _server->delete_from_set(pconn);

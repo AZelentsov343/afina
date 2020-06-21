@@ -1,150 +1,158 @@
 #include <afina/coroutine/Engine.h>
 
+#include <cassert>
 #include <csetjmp>
 #include <cstring>
-#include <string>
 
 namespace Afina {
-namespace Coroutine {
-    void Engine::Store(context &ctx) {
-        char addr;
-        if (&addr <= ctx.Low) {
-            ctx.Low = &addr;
-        } else {
-            ctx.Hight = &addr;
+    namespace Coroutine {
+
+        Engine::~Engine() {
+            for (auto coro = alive; coro != nullptr;) {
+                auto tmp = coro;
+                coro = coro->next;
+                delete tmp;
+            }
+
+            for (auto coro = blocked; coro != nullptr;) {
+                auto tmp = coro;
+                coro = coro->next;
+                delete tmp;
+            }
         }
 
-        uint32_t cur_size = ctx.Hight - ctx.Low;
-        if (std::get<1>(ctx.Stack) < cur_size) {
-            delete[] std::get<0>(ctx.Stack);
-            std::get<0>(ctx.Stack) = new char[cur_size];
-            std::get<1>(ctx.Stack) = cur_size;
+        void Engine::Store(context &ctx) {
+            char storeBeginAddress;
+            assert(ctx.Hight != nullptr && ctx.Low != nullptr);
+            // this condition used for different architectures,
+            // where stack low addresses can be greater than high addresses
+            if (&storeBeginAddress > ctx.Low) {
+                ctx.Hight = &storeBeginAddress;
+            } else {
+                ctx.Low = &storeBeginAddress;
+            }
+            auto stackSize = ctx.Hight - ctx.Low;
+            // we should allocate memory for new stack copy if it was't allocated yet
+            // or current stack size isn't big enough or current stack size is too big
+            if (stackSize > std::get<1>(ctx.Stack) || stackSize * 2 < std::get<1>(ctx.Stack)) {
+                delete[] std::get<0>(ctx.Stack);
+                std::get<0>(ctx.Stack) = new char[stackSize];
+                std::get<1>(ctx.Stack) = stackSize;
+            }
+            memcpy(std::get<0>(ctx.Stack), ctx.Low, stackSize);
         }
-        memcpy(std::get<0>(ctx.Stack), ctx.Low, cur_size);
-    }
 
-    void Engine::Restore(context &ctx) {
-        char addr;
-        if ((&addr <= ctx.Hight) && (&addr >= ctx.Low)) {
-            Restore(ctx);
+        void Engine::Restore(context &ctx) {
+            char restoreBeginAddress;
+            // used for saving stack of restored coroutine
+            while (&restoreBeginAddress <= ctx.Hight && &restoreBeginAddress >= ctx.Low) {
+                Restore(ctx);
+            }
+            // now we can restore coroutine's stack without changing our stack
+            std::memcpy(ctx.Low, std::get<0>(ctx.Stack), ctx.Hight - ctx.Low);
+            cur_routine = &ctx;
+            // run coroutine from the point where it was stopped
+            longjmp(ctx.Environment, 1);
         }
 
-        uint32_t cur_size = ctx.Hight - ctx.Low;
-        memcpy(ctx.Low, std::get<0>(ctx.Stack), cur_size);
-        cur_routine = &ctx;
-        longjmp(ctx.Environment, 1);
-    }
-
-    void Engine::yield() {
-        if (alive == nullptr || (cur_routine == alive && alive->next == nullptr)) {
-            return;
-        }
-        context *next_routine = alive;
-        if (alive != nullptr && alive == cur_routine) {
-            next_routine = alive->next;
-        }
-        if (next_routine != nullptr) {
-            if (cur_routine != nullptr && cur_routine != idle_ctx) {
+        void Engine::Enter(Engine::context *ctx) {
+            assert(cur_routine != nullptr);
+            if (cur_routine != idle_ctx) {
                 if (setjmp(cur_routine->Environment) > 0) {
                     return;
                 }
                 Store(*cur_routine);
             }
-            //cur_routine = next_routine;
-            Restore(*next_routine);
+            Restore(*ctx);
         }
-    }
 
-    void Engine::sched(void *routine_) {
-        context* next_routine = static_cast<context *>(routine_);
-        if (next_routine == cur_routine || next_routine->is_block) {
-            return;
-        }
-        if (next_routine != nullptr) {
-            if (cur_routine != nullptr && cur_routine != idle_ctx) {
-                if (setjmp(cur_routine->Environment) > 0) {
-                    return;
-                }
-                Store(*cur_routine);
+        void Engine::yield() {
+            // we have no alive coroutines or we have only one alive coroutine, that is current
+            if (!alive || (cur_routine == alive && !alive->next)) return;
+            // choose the next coroutine
+            context *nextCoro;
+            if (cur_routine == alive) {
+                nextCoro = alive->next;
+            } else {
+                nextCoro = alive;
             }
-            //cur_routine = static_cast<context *>(routine_);
-            Restore(*next_routine);
-        } else {
-            yield();
-        }
-    }
-
-    void Engine::block(void *coro) {
-        context *coro_to_block;
-        if (coro == nullptr) {
-            coro_to_block = cur_routine;
-        } else {
-            coro_to_block = static_cast<context *>(coro);
-        }
-        if (coro_to_block == nullptr || coro_to_block->is_block) {
-            return;
-        }
-        if (coro_to_block == alive) {
-            alive = alive->next;
-        }
-        if (coro_to_block->next != nullptr) {
-            coro_to_block->next->prev = coro_to_block->prev;
-        }
-        if (coro_to_block->prev != nullptr) {
-            coro_to_block->prev->next = coro_to_block->next;
+            // run the next alive coroutine
+            Enter(nextCoro);
         }
 
-        coro_to_block->next = blocked;
-        coro_to_block->prev = nullptr;
-        blocked = coro_to_block;
-        if (coro_to_block->next != nullptr) {
-            coro_to_block->next->prev = coro_to_block;
-        }
-        coro_to_block->is_block = true;
-        if (cur_routine == coro_to_block) {
-            if (coro_to_block != idle_ctx && coro_to_block != nullptr) {
-                if (setjmp(coro_to_block->Environment) > 0) {
-                    return;
-                } else {
-                    Store(*coro_to_block);
-                }
+        void Engine::sched(void *coro) {
+            auto nextCoro = static_cast<context *>(coro);
+            if (nextCoro == nullptr) {
+                yield();
             }
-            Restore(*idle_ctx);
-        }
-    }
-
-    void Engine::unblock(void *coro) {
-        auto *coro_to_unblock = static_cast<context *>(coro);
-        if (coro_to_unblock == nullptr || !coro_to_unblock->is_block) {
-            return;
-        }
-        if (blocked == coro_to_unblock) {
-            blocked = blocked->next;
-        }
-        if (coro_to_unblock->next != nullptr) {
-            coro_to_unblock->next->prev = coro_to_unblock->prev;
-        }
-        if (coro_to_unblock->prev != nullptr) {
-            coro_to_unblock->prev->next = coro_to_unblock->next;
+            // we will do nothing if the next coroutine is blocked
+            if (nextCoro == cur_routine || nextCoro->isBlocked) {
+                return;
+            }
+            // run the next coroutine
+            Enter(nextCoro);
         }
 
-        coro_to_unblock->next = alive;
-        coro_to_unblock->prev = nullptr;
-        alive = coro_to_unblock;
-        if (coro_to_unblock->next != nullptr) {
-            coro_to_unblock->next->prev = coro_to_unblock;
+        void Engine::block(void *coro) {
+            context *blockedCoro;
+            // if argument coro == nullptr, then we should block current coroutine
+            if (!coro) {
+                blockedCoro = cur_routine;
+            } else {
+                blockedCoro = static_cast<context *>(coro);
+            }
+            // we shouldn't block coroutine if it's already blocked
+            if (!blockedCoro || blockedCoro->isBlocked) {
+                return;
+            }
+            blockedCoro->isBlocked = true;
+            // delete coroutine from the list of alive coroutines
+            if (alive == blockedCoro) {
+                alive = alive->next;
+            }
+            if (blockedCoro->prev) {
+                blockedCoro->prev->next = blockedCoro->next;
+            }
+            if (blockedCoro->next) {
+                blockedCoro->next->prev = blockedCoro->prev;
+            }
+            // add coroutine to the list of blocked coroutines
+            blockedCoro->prev = nullptr;
+            blockedCoro->next = blocked;
+            blocked = blockedCoro;
+            if (blocked->next) {
+                blocked->next->prev = blockedCoro;
+            }
+            if (blockedCoro == cur_routine) {
+                Enter(idle_ctx);
+            }
         }
-        coro_to_unblock->is_block = false;
-    }
 
-    void Engine::all_unblock() {
-        context *coro = blocked;
-        while (coro != nullptr) {
-            unblock(coro);
-            coro = coro->next;
+        void Engine::unblock(void *coro) {
+            auto unblockedCoro = static_cast<context *>(coro);
+            // we shouldn't unblock coroutine if it's already unblocked
+            if (!unblockedCoro || !unblockedCoro->isBlocked) {
+                return;
+            }
+            unblockedCoro->isBlocked = false;
+            // delete coroutine from the list of blocked coroutines
+            if (blocked == unblockedCoro) {
+                blocked = blocked->next;
+            }
+            if (unblockedCoro->prev) {
+                unblockedCoro->prev->next = unblockedCoro->next;
+            }
+            if (unblockedCoro->next) {
+                unblockedCoro->next->prev = unblockedCoro->prev;
+            }
+            // add coroutine to the list of alive coroutines
+            unblockedCoro->prev = nullptr;
+            unblockedCoro->next = alive;
+            alive = unblockedCoro;
+            if (alive->next) {
+                alive->next->prev = unblockedCoro;
+            }
         }
-    }
 
-    Engine::context *Engine::get_curroutine() { return cur_routine; }
-} // namespace Coroutine
+    } // namespace Coroutine
 } // namespace Afina

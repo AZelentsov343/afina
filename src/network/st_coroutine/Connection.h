@@ -1,4 +1,5 @@
-#pragma once
+#ifndef AFINA_NETWORK_ST_COROUTINE_CONNECTION_H
+#define AFINA_NETWORK_ST_COROUTINE_CONNECTION_H
 
 #include <cstring>
 
@@ -9,40 +10,46 @@
 #include <sys/epoll.h>
 
 namespace Afina {
-namespace Network {
-namespace STcoroutine {
+    namespace Network {
+        namespace STcoroutine {
 
-    class Connection {
-    public:
-        Connection(int s, std::shared_ptr<Afina::Storage> &ps, std::shared_ptr<spdlog::logger> &pl,
-                   Afina::Coroutine::Engine *engine)
-                : _socket(s), _pStorage(ps), _logger(pl), _engine(engine) {
-            is_alive = false;
-            _ctx = nullptr;
-        }
+            class Connection {
+            public:
+                Connection(int s, std::shared_ptr<Afina::Storage> &ps,
+                           std::shared_ptr<spdlog::logger> &pl,
+                           Afina::Coroutine::Engine *engine) : _socket(s), _is_alive(false), _ctx(nullptr),
+                                                               _engine(engine), _pStorage(ps), _logger(pl) {}
 
-        inline bool isAlive() const { return is_alive; }
+                inline bool isAlive() const { return _is_alive; }
 
-        void Start();
+                void Start();
 
-    protected:
-        void OnError();
-        void OnClose();
-        void Process();
+            protected:
+                void OnError();
+                void OnClose();
+                void DoReadWrite();
 
-    private:
-        friend class ServerImpl;
+            private:
+                friend class ServerImpl;
 
-        int _socket;
-        struct epoll_event _event;
-        bool is_alive;
-        Afina::Coroutine::Engine::context *_ctx;
-        Afina::Coroutine::Engine *_engine;
+                int _socket;
 
-        std::shared_ptr<Afina::Storage> _pStorage;
-        std::shared_ptr<spdlog::logger> _logger;
-    };
+                bool _is_alive;
 
-} // namespace STcoroutine
-} // namespace Network
+                // context for DoReadWrite coroutine
+                Afina::Coroutine::Engine::context *_ctx;
+
+                // engine for coroutines running
+                Afina::Coroutine::Engine *_engine;
+
+                struct epoll_event _event;
+
+                std::shared_ptr<spdlog::logger> _logger;
+                std::shared_ptr<Afina::Storage> _pStorage;
+
+            };
+        } // namespace STcoroutine
+    } // namespace Network
 } // namespace Afina
+
+#endif // AFINA_NETWORK_ST_COROUTINE_CONNECTION_H

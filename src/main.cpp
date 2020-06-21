@@ -18,8 +18,8 @@
 #include "network/mt_blocking/ServerImpl.h"
 #include "network/mt_nonblocking/ServerImpl.h"
 #include "network/st_blocking/ServerImpl.h"
-#include "network/st_nonblocking/ServerImpl.h"
 #include "network/st_coroutine/ServerImpl.h"
+#include "network/st_nonblocking/ServerImpl.h"
 
 #include "storage/SimpleLRU.h"
 #include "storage/ThreadSafeSimpleLRU.h"
@@ -40,7 +40,7 @@ public:
         console.color = true;
 
         Logging::Logger &logger = logConfig->loggers["root"];
-        logger.level = Logging::Logger::Level::WARNING;
+        logger.level = Logging::Logger::Level::DEBUG;
         logger.appenders.push_back("console");
         logger.format = "[%H:%M:%S %z] [thread %t] [%n] [%l] %v";
         logService.reset(new Logging::ServiceImpl(logConfig));
@@ -107,11 +107,11 @@ public:
     }
 
 private:
-    std::shared_ptr<Afina::Logging::Config> logConfig;
-    std::shared_ptr<Afina::Logging::Service> logService;
+    std::shared_ptr<Logging::Config> logConfig;
+    std::shared_ptr<Logging::Service> logService;
 
     std::shared_ptr<Afina::Storage> storage;
-    std::shared_ptr<Afina::Network::Server> server;
+    std::shared_ptr<Network::Server> server;
 };
 
 // Signal set that to notify application about time to stop

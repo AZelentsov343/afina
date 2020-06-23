@@ -46,13 +46,13 @@ namespace Afina {
                 // Port to listen for new connections, permits access only from
                 // inside of accept_thread
                 // Read-only
-                uint16_t listen_port;
+                uint16_t listen_port{};
 
                 // Socket to accept new connection on, shared between acceptors
-                int _server_socket;
+                int _server_socket{};
 
                 // Custom event "device" used to wakeup workers
-                int _event_fd;
+                int _event_fd{};
 
                 // set of connections for it's correct closing and deleting in the end
                 std::unordered_set<Connection *> _connections;

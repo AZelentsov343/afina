@@ -56,32 +56,7 @@ IF (NOT AFINA_VERSION)
     git_describe(AFINA_VERSION --long --tags --match "v[0-9]*" --abbrev=4)
 ENDIF()
 
-# major.minor.patch part of version
-MESSAGE(STATUS "Version: " ${AFINA_VERSION} )
-if ("${AFINA_VERSION}" MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+")
-    string(REGEX REPLACE "^v([0-9]+)\\..*" "\\1" VERSION_MAJOR "${AFINA_VERSION}")
-    string(REGEX REPLACE "^v[0-9]+\\.([0-9]+)\\..*" "\\1" VERSION_MINOR "${AFINA_VERSION}")
-    string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.([0-9]+).*" "\\1" VERSION_PATCH "${AFINA_VERSION}")
-else()
-    message(FATAL_ERROR "Version has wrong format, check major/minor/patch parts of version")
-endif()
 
-# additional git part of version
-if ("${AFINA_VERSION}" MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+-[a-zA-Z0-9]+")
-    string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+).*" "\\1" VERSION_COMMITS "${AFINA_VERSION}")
-    string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+-(.*)" "\\1" VERSION_SHA1 "${AFINA_VERSION}")
-else()
-    message(WARNING "Version has no full git info")
-    set(VERSION_COMMITS "")
-    set(VERSION_SHA1 "")
-endif()
-
-MESSAGE( STATUS "VERSION_MAJOR: " ${VERSION_MAJOR} )
-MESSAGE( STATUS "VERSION_MINOR: " ${VERSION_MINOR} )
-MESSAGE( STATUS "VERSION_PATCH: " ${VERSION_PATCH} )
-MESSAGE( STATUS "VERSION_COMMITS: " ${VERSION_COMMITS} )
-MESSAGE( STATUS "VERSION_SHA1: " ${VERSION_SHA1} )
-MESSAGE( STATUS "VERSION_DIRTY: " ${AFINA_VERSION_DIRTY} )
 
 
 ##############################################################################

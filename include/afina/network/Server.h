@@ -5,25 +5,25 @@
 #include <vector>
 
 namespace Afina {
-class Storage;
-namespace Logging {
-class Service;
-}
+    class Storage;
+    namespace Logging {
+        class Service;
+    }
 namespace Network {
 
 /**
- * # Network processors coordinator
- * Configure resources for the network processors and coordinates all work
- */
+* # Network processors coordinator
+* Configure resources for the network processors and coordinates all work
+*/
 class Server {
 public:
     Server(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl)
-        : pStorage(ps), pLogging(pl) {}
+            : pStorage(ps), pLogging(pl) {}
     virtual ~Server() {}
 
     /**
      * Starts network service. After method returns process should
-     * listen on the given interface/port pair to process  incomming
+     * listen on the given interface/port pair to process  incoming
      * data in workers number of threads
      */
     virtual void Start(uint16_t port, uint32_t acceptors = 1, uint32_t workers = 1) = 0;
@@ -46,7 +46,7 @@ public:
 
 protected:
     /**
-     * Instance of backing storeage on which current server should execute
+     * Instance of backing storage on which current server should execute
      * each command
      */
     std::shared_ptr<Afina::Storage> pStorage;

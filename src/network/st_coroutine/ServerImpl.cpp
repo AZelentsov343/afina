@@ -108,7 +108,11 @@ void ServerImpl::Stop() {
 }
 
 // See Server.h
-void ServerImpl::Join() {}
+void ServerImpl::Join() {
+    if (_work_thread.joinable()) {
+        _work_thread.join();
+    }
+}
 
 // See ServerImpl.h
 void ServerImpl::OnRun() {
@@ -247,16 +251,13 @@ void ServerImpl::OnRun() {
     _logger->warn("Acceptor stopped");
     _ctx = nullptr;
     // Wait for work to be complete
-    if (_work_thread.joinable()) {
-        _work_thread.join();
-
-        for (auto connection : _connections) {
-            close(connection->_socket);
-            delete connection;
-        }
-        _connections.clear();
-        close(_server_socket);
+    for (auto connection : _connections) {
+        close(connection->_socket);
+        delete connection;
     }
+    _connections.clear();
+    close(_server_socket);
+
     _logger->warn("Acceptor stopped completely");
 }
 
